@@ -1,0 +1,217 @@
+---
+title: "Covid-19 SNF Cases for Sonoma County, California"
+output:
+  html_document:
+    df_print: paged
+    css: style.css
+thanks: "Replication files are available on the author's Github account..."
+---
+
+
+<table style='background-color: #f1f1f1; color: #15477e; text-align: left;font-weight: 500 !important; font-size: 11px  !important; font-family: roboto,geneva,sans-serif;'  border="1">    
+  <tbody>
+    <tr>
+      <td style="padding: 5px">Author:</td>
+      <td style="padding: 5px">Bill Herron</td>
+    </tr>
+    <tr>
+      <td style="padding: 5px">Company:</td>
+      <td style="padding: 5px">Zanden Communications</td>
+    </tr>
+    <tr>
+      <td style="padding: 5px">Date:</td>
+      <td style="padding: 5px">July 28, 2020</td>
+    </tr>
+    <tr>
+      <td style="padding: 5px">Revision:</td>
+      <td style="padding: 5px">0.81</td>
+    </tr>
+  </tbody>
+  </table>
+
+
+
+```{r setup, echo=FALSE, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## **Skilled Nursing Facility Infection Rates, Sonona County**
+
+This is a map showing Skilled Nursing Home infections for Sonoma County, California.
+
+```{r echo=FALSE}
+rm(list = ls())
+```
+
+
+```{r results='hide', message=FALSE, echo=FALSE}
+pkgs <- c("leaflet", "leafem", "leaflet.minicharts", "ggplot2", "tidyverse", "readxl", "htmlwidgets", "htmltools")
+sapply(pkgs, function(x) if(!x %in% installed.packages()) install.packages(x, repos = "http://cran.us.r-project.org"))
+sapply(pkgs, library, character.only = TRUE)
+```
+
+```{r echo=FALSE}
+# library(dplyr)
+my_map <- leaflet() %>%
+  addTiles() 
+# my_map  # Print the map
+```
+
+
+```{r ECHO=FALSE, include=FALSE,  message=FALSE, warning=FALSE}
+my_homes <- read_excel("healthcare_facility_locations.xlsx", sheet = "HEALTH_FAC_LOCATION_20200630")
+
+# only get the sonoma county SNF's, but do not
+#  include FRIENDS HOUSE because it is closing...
+
+my_homes <- my_homes %>% filter(COUNTY_NAME == "SONOMA" & (FAC_TYPE_CODE == "SNF" & (FACNAME != "FRIENDS HOUSE" | is.na(FACNAME))))
+```
+
+
+
+
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+
+# define a function which creates a nice table
+#  with the pertinent information for each SNF
+createTable <- function(residents, staff, deaths) {
+  
+  return(paste("<center><table style='background-color: #f1f1f1; border-style: solid; border-color: #696969;' cellpadding='2' cellspacing='1'>
+<tbody>
+<tr>
+<td style='text-align: right;'>Resident Infections:</td>
+<td style='text-align: center;'>", as.character(residents), "</td>
+</tr>
+<tr>
+<td style='text-align: right;'>Staff Infections:</td>
+<td style='text-align: center;'>", as.character(staff), "</td>
+</tr>
+<tr>
+<td style='text-align: right;'>Resident Deaths:</td>
+<td style='text-align: center;'>", as.character(deaths), "</td>
+</tr>
+</tbody>
+</table></center>", sep=""))
+  
+  
+}
+
+
+# create an empty vector with concatentation function
+my_sites <- c()
+
+for(i in 1:nrow(my_homes)) {
+    url<- unlist(my_homes[i,"URL"])
+    name <- unlist(my_homes[i, "FACNAME"])
+    my_sites <- append(my_sites, paste("<a href='", url, "'>", name, "</a><center>", str_to_title(unlist(my_homes[i, "ADDRESS"])), "<br>", str_to_title(unlist(my_homes[i, "CITY"])), " ,CA ", str_to_title(unlist(my_homes[i, "ZIP"])), "<br>", "</center>", createTable(unlist(my_homes[i, "RESIDENTINFECTIONS"]), unlist(my_homes[i, "STAFFINFECTIONS"]), unlist(my_homes[i, "DEATHS"])), sep=""))
+}
+
+
+# specify the levels, force the sequence
+my_homes$colorBuckets <- factor(c('low', 'medium', 'high')[as.numeric(cut(my_homes$RESIDENTINFECTIONS, c(-1, 2, 11, max(my_homes$RESIDENTINFECTIONS))))], levels = c("low", "medium", "high"))
+
+
+# try to convert these buckets to color names
+palette<-c("lightblue","orange","red")
+
+my_homes$goodbear<-sample(as.factor(c("terrific","marvelous","culparterretaping")),nrow(my_homes),replace=T)
+#Colors
+joliepalette<-c("lightblue","orange","red")[1:nlevels(my_homes$colorBuckets)]
+getColor <- function(my_homes) {   return(joliepalette[my_homes$colorBuckets])
+}
+
+icons <- awesomeIcons(
+    icon = NULL,
+    iconColor = 'black',
+    library = 'ion',
+    text = as.character(my_homes$RESIDENTINFECTIONS),
+    fontFamily = "sans-serif",
+    markerColor = getColor(my_homes)
+)
+
+#Generate the javascript
+
+jsscript3<-
+    paste0(
+        "function(cluster) {
+const groups= [",paste("'",levels(my_homes$colorBuckets),"'",sep="",collapse=","),"];
+const colors= {
+groups: [",paste("'",joliepalette,"'",sep="",collapse=","),"],
+center:'#ddd',
+text:'black'
+};
+const markers= cluster.getAllChildMarkers();
+
+const proportions= groups.map(group => markers.filter(marker => marker.options.group === group).length / markers.length);
+function sum(arr, first= 0, last) {
+return arr.slice(first, last).reduce((total, curr) => total+curr, 0);
+}
+const cumulativeProportions= proportions.map((val, i, arr) => sum(arr, 0, i+1));
+cumulativeProportions.unshift(0);
+
+const width = 2*Math.sqrt(markers.length);
+const radius= 15+width/2;
+
+const arcs= cumulativeProportions.map((prop, i) => { return {
+x   :  radius*Math.sin(2*Math.PI*prop),
+y   : -radius*Math.cos(2*Math.PI*prop),
+long: proportions[i-1] >.5 ? 1 : 0
+}});
+const paths= proportions.map((prop, i) => {
+if (prop === 0) return '';
+else if (prop === 1) return `<circle cx='0' cy='0' r='${radius}' fill='none' stroke='${colors.groups[i]}' stroke-width='${width}' stroke-alignment='center' stroke-linecap='butt' />`;
+else return `<path d='M ${arcs[i].x} ${arcs[i].y} A ${radius} ${radius} 0 ${arcs[i+1].long} 1 ${arcs[i+1].x} ${arcs[i+1].y}' fill='none' stroke='${colors.groups[i]}' stroke-width='${width}' stroke-alignment='center' stroke-linecap='butt' />`
+});
+
+return new L.DivIcon({
+html: `
+<svg width='60' height='60' viewBox='-30 -30 60 60' style='width: 60px; height: 60px; position: relative; top: -24px; left: -24px;' >
+<circle cx='0' cy='0' r='15' stroke='none' fill='${colors.center}' />
+<text x='0' y='0' dominant-baseline='central' text-anchor='middle' fill='${colors.text}' font-size='15'>${markers.length}</text>
+${paths.join('')}
+</svg>
+`,
+className: 'marker-cluster'
+});
+}")
+
+
+
+rr2 <- htmltools::tags$div(
+HTML('<p style="color: #15477e; text-align: center;font-weight: 300 !important;margin-left: 10px;margin-right: 10px;font-size: 14px  !important;">Sonoma County Skilled Nursing Facility Cumulative Infections</p>
+<p style="text-align: center;"><span style="font-family: roboto,geneva,sans-serif;font-size: 12px  !important;">July 28, 2020</span></p')
+)  
+
+
+# Generates the map.
+leaflet(width = "100%") %>%
+  addTiles() %>%
+  addLegend("bottomleft", 
+    colors =c("lightblue",  "orange", "red"),
+    labels= c("low (0 - 2)", "moderate (3 - 11)","severe (> 11)"),  
+    title= "Infection Severity",
+    opacity = .75) %>%
+    addControl(rr2, position = "topright") %>%
+     
+    addLogo("https://raw.githubusercontent.com/bill-herron/oas_resources/master/Zanden-Logo.PNG", width = 120,
+      height = 120, alpha = .5, , url = "https://www.zanden.com/") %>% 
+    # addPulseMarkers(
+    #lng=-122.458411, lat=38.27839,
+    #label='This is a hot spot!',
+    #  icon = makePulseIcon(heartbeat = 0.8))      #%>%   
+    addAwesomeMarkers(data=my_homes,
+            group=~colorBuckets,
+            icon = icons,
+            popup = my_sites,
+            # label = lapply(labs,htmltools::HTML),
+            label = my_homes$SHORTNAME,
+         labelOptions = labelOptions(noHide = T, opacity = .65, textOnly = FALSE, textsize = "10px", direction = "right"), clusterOptions = markerClusterOptions(
+            iconCreateFunction = JS(jsscript3))) %>% addMiniMap(
+    toggleDisplay = TRUE, zoomAnimation = TRUE,
+    tiles = providers$Stadia.OSMBright, height=100, width=150)
+
+
+
+
+```
